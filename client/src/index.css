@@ -1,0 +1,105 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    font-family: "Inter", sans-serif;
+    background-color: #F8FAF8;
+    color: #1a1a2e;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: "Outfit", sans-serif;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply bg-primary text-white rounded-lg px-6 py-3 font-body font-medium
+           hover:bg-primary/90 active:scale-[0.98] transition-all duration-150
+           focus:outline-none focus:ring-2 focus:ring-primary/40;
+  }
+
+  .btn-secondary {
+    @apply bg-secondary/10 text-secondary rounded-lg px-6 py-3 font-body font-medium
+           hover:bg-secondary/20 active:scale-[0.98] transition-all duration-150
+           focus:outline-none focus:ring-2 focus:ring-secondary/40;
+  }
+
+  .btn-outline {
+    @apply border border-primary text-primary rounded-lg px-6 py-3 font-body font-medium
+           hover:bg-primary hover:text-white active:scale-[0.98] transition-all duration-150
+           focus:outline-none focus:ring-2 focus:ring-primary/40;
+  }
+
+  .card {
+    @apply bg-white rounded-2xl shadow-card border border-gray-100 p-6;
+  }
+
+  .input-field {
+    @apply w-full border border-gray-200 rounded-lg p-3 font-body text-sm
+           focus:outline-none focus:border-secondary focus:ring-2 focus:ring-secondary/20
+           placeholder:text-gray-400 transition-all duration-150;
+  }
+
+  .label {
+    @apply block text-sm font-medium text-gray-700 mb-1.5 font-body;
+  }
+
+  .badge-warning {
+    @apply bg-warning/10 text-warning text-xs font-medium px-2.5 py-1 rounded-full;
+  }
+
+  .badge-danger {
+    @apply bg-danger/10 text-danger text-xs font-medium px-2.5 py-1 rounded-full;
+  }
+
+  .badge-success {
+    @apply bg-secondary/10 text-secondary text-xs font-medium px-2.5 py-1 rounded-full;
+  }
+
+  .badge-info {
+    @apply bg-info/10 text-info text-xs font-medium px-2.5 py-1 rounded-full;
+  }
+
+  .sidebar-link {
+    @apply flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium
+           text-gray-600 hover:bg-light hover:text-primary transition-all duration-150;
+  }
+
+  .sidebar-link.active {
+    @apply bg-primary text-white hover:bg-primary/90 hover:text-white;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* Dark mode scrollbar for landing */
+.dark-page ::-webkit-scrollbar-thumb { background: #374151; }
+
+/* Number font for stats */
+.font-stat {
+  font-family: "JetBrains Mono", monospace;
+}
+
+/* Arbitrary bg-white/8 support */
+.hover\:bg-white\/8:hover { background-color: rgb(255 255 255 / 0.08); }
+.bg-white\/8 { background-color: rgb(255 255 255 / 0.08); }
+
+/* Gradient text clip */
+.bg-clip-text { -webkit-background-clip: text; background-clip: text; }
+.text-transparent { color: transparent; }

@@ -214,3 +214,7 @@ server/uploads/
 # Docker (if used later)
 .dockerignore
 docker-compose.override.yml
+
+# Datasets
+datasets/
+model/data/
