@@ -24,11 +24,14 @@ def train_model():
     # ── 1. Enhanced Data Augmentation ────────────────────────────────────────
     data_transforms = {
         'train': transforms.Compose([
-            transforms.RandomResizedCrop(224, scale=(0.7, 1.0)),
+            transforms.RandomResizedCrop(224, scale=(0.6, 1.0)),
             transforms.RandomHorizontalFlip(),
-            transforms.RandomVerticalFlip(p=0.2),
-            transforms.RandomRotation(20),
-            transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.2, hue=0.1),
+            transforms.RandomVerticalFlip(p=0.3),
+            transforms.RandomRotation(45),
+            transforms.RandomPerspective(distortion_scale=0.4, p=0.3),  # Warps image to simulate weird camera angles
+            transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+            transforms.GaussianBlur(kernel_size=(5, 9), sigma=(0.1, 3.0)), # Simulates out-of-focus mobile cameras
+            transforms.RandomAdjustSharpness(sharpness_factor=2, p=0.3),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ]),

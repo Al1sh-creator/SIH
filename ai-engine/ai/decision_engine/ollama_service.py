@@ -30,16 +30,16 @@ logger = logging.getLogger(__name__)
 
 class OllamaService:
     def __init__(self):
-        # We use llama3-8b-8192 on Groq
+        # We use openai/gpt-oss-20b on Groq
         self.llm = ChatGroq(
             api_key=os.environ.get("GROQ_API_KEY"),
-            model_name="llama3-8b-8192",
+            model_name="openai/gpt-oss-20b",
             temperature=0.2, 
         )
 
     def generate_response(self, prompt: str) -> dict:
         try:
-            logger.info("Sending prompt to Groq (llama3-8b-8192)...")
+            logger.info("Sending prompt to Groq (openai/gpt-oss-20b)...")
             
             # Use stream to show live generation in the terminal
             print("\n[AI Module] --- Groq is typing (Live Generation)... ---")

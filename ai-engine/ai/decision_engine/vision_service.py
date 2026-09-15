@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import base64
+import math
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
@@ -9,6 +10,43 @@ from PIL import Image
 from io import BytesIO
 
 logger = logging.getLogger(__name__)
+
+# ─── OOD (Out-Of-Distribution) Detection Thresholds ──────────────────────────
+# If the model's top confidence is below this value, the image is likely NOT a
+# plant leaf and we reject it outright.
+MIN_CONFIDENCE_THRESHOLD = 70.0   # percent (0-100)
+
+# Maximum allowed prediction entropy. Entropy measures how "spread out" the
+# probability distribution is across classes. A high entropy (close to
+# log(num_classes)) means the model is guessing — typical of random images.
+# We normalise entropy to [0, 1] and reject if it exceeds this threshold.
+MAX_NORMALISED_ENTROPY = 0.75
+
+# ─── ImageNet Pre-Filter (Leaf/Plant Gate) ────────────────────────────────────
+# A stock ImageNet-pretrained MobileNetV2 is used as a *gatekeeper* before the
+# disease classifier runs. We scan its top-K predictions for plant-related
+# keywords. If none are found the image is rejected immediately — before any
+# disease softmax probabilities are ever computed.
+#
+# This sidesteps the well-known "softmax overconfidence" problem: a closed-set
+# classifier always picks *some* class, even for completely unrelated images.
+
+# How many of the top ImageNet predictions to scan for plant keywords.
+IMAGENET_TOPK = 5
+
+# Keywords that indicate the image contains plant-like content.
+# Matched case-insensitively against ImageNet class label strings.
+PLANT_KEYWORDS = {
+    "leaf", "plant", "flower", "tree", "fruit", "corn", "tomato", "potato",
+    "grape", "strawberry", "peach", "apple", "squash", "pepper", "herb",
+    "fern", "moss", "blossom", "petal", "stem", "root", "seed", "crop",
+    "vegetable", "garden", "fungus", "mold", "rust", "blight", "cabbage",
+    "lettuce", "spinach", "citrus", "lemon", "lime", "orange", "banana",
+    "mango", "papaya", "broccoli", "cauliflower", "artichoke", "zucchini",
+    "cucumber", "pumpkin", "berry", "cherry", "rose", "daisy", "tulip",
+    "sunflower", "acorn", "pine", "oak", "maple", "willow", "bamboo",
+    "cactus", "succulent", "aloe", "wheat", "rice", "soybean", "cotton",
+}
 
 # ─── Built-in treatment knowledge base ───────────────────────────────────────
 # Used as fallback when Groq API is unreachable, so the user always gets a result.
@@ -164,7 +202,7 @@ class VisionService:
                 from langchain_core.messages import HumanMessage
                 self.llm = ChatGroq(
                     api_key=groq_key,
-                    model_name="llama3-8b-8192",
+                    model_name="openai/gpt-oss-20b",
                     temperature=0.2,
                 )
                 logger.info("Groq LLM initialized successfully.")
@@ -221,11 +259,121 @@ class VisionService:
         except Exception as e:
             logger.error(f"Error loading local CV model: {e}")
 
+        # ── ImageNet Pre-Filter Model ──────────────────────────────────────────
+        # A stock ImageNet MobileNetV2 used purely as a plant/leaf gatekeeper.
+        # It never sees disease-specific weights — only used to decide whether
+        # the input image is plant-like at all before the disease model runs.
+        self.imagenet_model = None
+        self.imagenet_classes = None
+        try:
+            import torchvision
+            # Load ImageNet class labels bundled with torchvision
+            # (available in torchvision >= 0.13 via built-in weights API)
+            try:
+                weights = models.MobileNet_V2_Weights.IMAGENET1K_V1
+                self.imagenet_model = models.mobilenet_v2(weights=weights)
+                self.imagenet_classes = weights.meta["categories"]
+                logger.info("ImageNet pre-filter loaded via new weights API.")
+            except AttributeError:
+                # Older torchvision — fall back to pretrained=True
+                self.imagenet_model = models.mobilenet_v2(pretrained=True)
+                # Fetch class labels from the standard torchvision URL
+                import urllib.request
+                import json as _json
+                _labels_url = (
+                    "https://raw.githubusercontent.com/anishathalye/imagenet-simple-labels"
+                    "/master/imagenet-simple-labels.json"
+                )
+                try:
+                    with urllib.request.urlopen(_labels_url, timeout=5) as resp:
+                        self.imagenet_classes = _json.loads(resp.read().decode())
+                    logger.info("ImageNet labels fetched from remote URL.")
+                except Exception:
+                    # Ultimate fallback: use numeric indices (pre-filter disabled)
+                    self.imagenet_classes = None
+                    logger.warning(
+                        "Could not fetch ImageNet labels — plant pre-filter will be disabled."
+                    )
+
+            if self.imagenet_model is not None:
+                self.imagenet_model = self.imagenet_model.to(self.device)
+                self.imagenet_model.eval()
+                logger.info("ImageNet pre-filter model ready on device=%s", self.device)
+        except Exception as e:
+            logger.warning(f"Could not load ImageNet pre-filter model: {e}. Pre-filter disabled.")
+            self.imagenet_model = None
+            self.imagenet_classes = None
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Step 0 — ImageNet Plant Pre-Filter
+    # ──────────────────────────────────────────────────────────────────────────
+    def _is_plant_image(self, image: Image.Image) -> bool:
+        """Return True only if the image looks plant-like according to ImageNet.
+
+        Uses a stock ImageNet-pretrained MobileNetV2 to scan the top-K predicted
+        class labels for plant-related keywords.  This gating step happens *before*
+        the closed-set disease classifier so that overconfident softmax scores on
+        non-plant images never reach the user.
+
+        If the pre-filter model is unavailable (failed to load), this method
+        returns True (i.e. it fails open, letting the existing OOD checks decide).
+        """
+        if self.imagenet_model is None or self.imagenet_classes is None:
+            # Pre-filter not available — fail open, let downstream checks decide.
+            logger.debug("[PreFilter] ImageNet model unavailable — skipping pre-filter.")
+            return True
+
+        input_tensor = self.transform(image).unsqueeze(0).to(self.device)
+
+        with torch.no_grad():
+            output = self.imagenet_model(input_tensor)
+            probabilities = torch.nn.functional.softmax(output[0], dim=0)
+
+        # Grab top-K class indices
+        topk_probs, topk_indices = torch.topk(probabilities, IMAGENET_TOPK)
+        topk_labels = [
+            self.imagenet_classes[idx.item()].lower()
+            for idx in topk_indices
+        ]
+
+        logger.debug(f"[PreFilter] Top-{IMAGENET_TOPK} ImageNet labels: {topk_labels}")
+
+        # Check whether any plant keyword appears in any of the top labels
+        for label in topk_labels:
+            for keyword in PLANT_KEYWORDS:
+                if keyword in label:
+                    logger.info(
+                        f"[PreFilter] Plant keyword '{keyword}' found in ImageNet label '{label}' — PASS."
+                    )
+                    return True
+
+        print(
+            "\n"
+            "╔══════════════════════════════════════════════════════════╗\n"
+            "║  ✗  NOT A PLANT IMAGE — REQUEST REJECTED                 ║\n"
+            "╠══════════════════════════════════════════════════════════╣\n"
+           f"║  Top-{IMAGENET_TOPK} ImageNet labels: {', '.join(topk_labels):<34}║\n"
+            "║  None matched any plant keyword.                         ║\n"
+            "║  Returning 422 to client.                                ║\n"
+            "╚══════════════════════════════════════════════════════════╝"
+        )
+        logger.warning(
+            f"[PreFilter] No plant keyword found in top-{IMAGENET_TOPK} ImageNet labels: {topk_labels} — REJECT."
+        )
+        return False
+
     # ──────────────────────────────────────────────────────────────────────────
     # Step 1 — Local CV classification
     # ──────────────────────────────────────────────────────────────────────────
     def _predict_local(self, base64_image: str) -> tuple:
-        """Run the local MobileNetV2 model. Returns (class_name, confidence%)."""
+        """Run the local MobileNetV2 model. Returns (class_name, confidence%).
+
+        Raises ValueError if the image is detected as out-of-distribution
+        (i.e. not a plant leaf) using three signals (applied in order):
+          0. ImageNet pre-filter: top-K labels contain no plant keyword.
+          1. Max softmax probability below MIN_CONFIDENCE_THRESHOLD.
+          2. Normalised prediction entropy above MAX_NORMALISED_ENTROPY.
+        """
         if self.model is None:
             raise RuntimeError("Local CV model is not loaded. Train it first with model/train.py")
 
@@ -233,6 +381,16 @@ class VisionService:
             base64_image.split(',')[1] if ',' in base64_image else base64_image
         )
         image = Image.open(BytesIO(image_data)).convert('RGB')
+
+        # ── OOD Check 0: ImageNet pre-filter (PRIMARY gate) ───────────────────
+        # This is the most reliable check. A stock ImageNet model has seen
+        # 1000 diverse classes — if none of the top-K predictions are plant-
+        # related, the image is almost certainly not a leaf.
+        if not self._is_plant_image(image):
+            raise ValueError(
+                "The uploaded image does not appear to be a plant or leaf. "
+                "Please upload a clear photo of a plant leaf for disease analysis."
+            )
 
         input_tensor = self.transform(image)
         input_batch = input_tensor.unsqueeze(0).to(self.device)
@@ -242,9 +400,75 @@ class VisionService:
             probabilities = torch.nn.functional.softmax(output[0], dim=0)
             confidence, predicted_idx = torch.max(probabilities, 0)
 
-        predicted_class = self.class_names[predicted_idx.item()]
         confidence_val = round(confidence.item() * 100, 2)
-        logger.info(f"[Local CV] Prediction: {predicted_class} ({confidence_val}%)")
+
+        # ── OOD Check 1: Max-probability threshold ────────────────────────────
+        if confidence_val < MIN_CONFIDENCE_THRESHOLD:
+            print(
+                "\n"
+                "╔══════════════════════════════════════════════════════════╗\n"
+                "║  ✗  LOW CONFIDENCE — REQUEST REJECTED                    ║\n"
+                "╠══════════════════════════════════════════════════════════╣\n"
+               f"║  Confidence : {confidence_val:>5.1f}%  (threshold: {MIN_CONFIDENCE_THRESHOLD:.0f}%)                 ║\n"
+                "║  The model is not sure enough — likely not a leaf.       ║\n"
+                "║  Returning 422 to client.                                ║\n"
+                "╚══════════════════════════════════════════════════════════╝"
+            )
+            logger.warning(
+                f"[OOD] Rejected — max confidence {confidence_val:.1f}% "
+                f"is below threshold {MIN_CONFIDENCE_THRESHOLD}%. Likely not a plant leaf."
+            )
+            raise ValueError(
+                f"The uploaded image does not appear to be a plant leaf "
+                f"(confidence too low: {confidence_val:.1f}%). "
+                "Please upload a clear photo of a plant leaf."
+            )
+
+        # ── OOD Check 2: Entropy of probability distribution ─────────────────
+        # High entropy → model is uniformly uncertain → random/irrelevant image.
+        probs_np = probabilities.cpu().numpy()
+        entropy = -sum(p * math.log(p + 1e-12) for p in probs_np)
+        max_entropy = math.log(len(self.class_names))  # worst-case entropy
+        normalised_entropy = entropy / max_entropy if max_entropy > 0 else 0
+
+        if normalised_entropy > MAX_NORMALISED_ENTROPY:
+            print(
+                "\n"
+                "╔══════════════════════════════════════════════════════════╗\n"
+                "║  ✗  HIGH ENTROPY — REQUEST REJECTED                      ║\n"
+                "╠══════════════════════════════════════════════════════════╣\n"
+               f"║  Entropy    : {normalised_entropy:>5.3f}  (threshold: {MAX_NORMALISED_ENTROPY:.2f})              ║\n"
+               f"║  Confidence : {confidence_val:>5.1f}%                                    ║\n"
+                "║  Model is uniformly uncertain — likely not a leaf.       ║\n"
+                "║  Returning 422 to client.                                ║\n"
+                "╚══════════════════════════════════════════════════════════╝"
+            )
+            logger.warning(
+                f"[OOD] Rejected — normalised entropy {normalised_entropy:.3f} "
+                f"exceeds threshold {MAX_NORMALISED_ENTROPY}. Likely not a plant leaf."
+            )
+            raise ValueError(
+                f"The uploaded image does not appear to be a plant leaf "
+                f"(prediction too uncertain: entropy={normalised_entropy:.2f}). "
+                "Please upload a clear photo of a plant leaf."
+            )
+
+        predicted_class = self.class_names[predicted_idx.item()]
+        display_name = predicted_class.replace("___", " — ").replace("_", " ")
+        print(
+            "\n"
+            "╔══════════════════════════════════════════════════════════╗\n"
+            "║  ✔  PLANT IMAGE ACCEPTED — DISEASE DETECTED              ║\n"
+            "╠══════════════════════════════════════════════════════════╣\n"
+           f"║  Disease    : {display_name:<44}║\n"
+           f"║  Confidence : {confidence_val:>5.1f}%                                    ║\n"
+           f"║  Entropy    : {normalised_entropy:>5.3f}  (lower = more certain)          ║\n"
+            "╚══════════════════════════════════════════════════════════╝"
+        )
+        logger.info(
+            f"[Local CV] Prediction: {predicted_class} ({confidence_val}%) "
+            f"| entropy={normalised_entropy:.3f}"
+        )
         return predicted_class, confidence_val
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -316,38 +540,82 @@ class VisionService:
     # ──────────────────────────────────────────────────────────────────────────
     # Public API — called by disease/views.py
     # ──────────────────────────────────────────────────────────────────────────
-    def analyze_disease(self, base64_image: str, crop_type: str = "Unknown/Other") -> dict:
+    def analyze_disease_fast(self, base64_image: str, crop_type: str = "Unknown/Other") -> dict:
         """
-        Analyze a plant leaf image for disease.
-        Strategy:
-            1. ALWAYS run local CV model first (primary — your trained data).
-            2. Try Groq API for rich treatment explanation.
-            3. If Groq fails → use built-in treatment knowledge base.
-        The user NEVER sees "Failed to analyze image".
+        STAGE 1 — Fast path (always returns in ~1-2 seconds).
+
+        Runs the local CV model + local knowledge-base treatment.
+        Never calls Groq — so it is always fast.
+
+        Returns a dict that includes:
+          - All standard result fields (disease_name, confidence, description, treatments)
+          - 'predicted_class': raw class key (used by the enhance endpoint)
+          - 'groq_enhanced': False  (signals to the frontend that Groq hasn't run yet)
         """
         try:
-            # ── Step 1: Local CV prediction (MUST succeed) ──
             predicted_class, confidence_val = self._predict_local(base64_image)
+            result = self._get_fallback_treatment(predicted_class, confidence_val)
+            # Pass raw class key so the enhance endpoint can use it without re-running the model
+            result['predicted_class'] = predicted_class
+            result['groq_enhanced'] = False
+            return result
+        except ValueError as ve:
+            logger.warning(f"[Vision] Invalid image rejected: {ve}")
+            return {'error': str(ve), 'error_type': 'invalid_image'}
+        except Exception as e:
+            logger.error(f"Vision Service Error (fast path): {e}", exc_info=True)
+            return {'error': str(e), 'error_type': 'server_error'}
 
-            # ── Step 2: Try Groq, fall back to local knowledge ──
+    def enhance_with_groq(self, predicted_class: str, confidence_val: float, crop_type: str = "Unknown/Other") -> dict:
+        """
+        STAGE 2 — Groq enhancement (called separately by the enhance endpoint).
+
+        Takes the already-computed predicted_class + confidence from Stage 1
+        and asks Groq for a richer treatment explanation.
+        Falls back to the local KB if Groq is unavailable or times out.
+        """
+        try:
             result = self._get_groq_treatment(predicted_class, confidence_val, crop_type)
-
             if result is not None:
-                # Groq succeeded — override disease_name/confidence with CV values for reproducibility
-                result['disease_name'] = predicted_class.replace("___", " — ").replace("_", " ")
+                result['disease_name'] = predicted_class.replace('___', ' — ').replace('_', ' ')
                 result['confidence'] = confidence_val
                 result['source'] = 'groq_api'
+                result['groq_enhanced'] = True
             else:
-                # Groq failed — use local fallback (never errors)
                 result = self._get_fallback_treatment(predicted_class, confidence_val)
-
+                result['groq_enhanced'] = False
+            return result
+        except Exception as e:
+            logger.error(f"Vision Service Error (Groq enhance): {e}", exc_info=True)
+            # Return local fallback so the frontend always gets something
+            result = self._get_fallback_treatment(predicted_class, confidence_val)
+            result['groq_enhanced'] = False
             return result
 
+    # Keep the original method for backwards compatibility
+    def analyze_disease(self, base64_image: str, crop_type: str = "Unknown/Other") -> dict:
+        """
+        Legacy single-call path (detect + Groq in one request).
+        Prefer analyze_disease_fast() + enhance_with_groq() for better UX.
+        """
+        try:
+            predicted_class, confidence_val = self._predict_local(base64_image)
+            result = self._get_groq_treatment(predicted_class, confidence_val, crop_type)
+            if result is not None:
+                result['disease_name'] = predicted_class.replace('___', ' — ').replace('_', ' ')
+                result['confidence'] = confidence_val
+                result['source'] = 'groq_api'
+                result['groq_enhanced'] = True
+            else:
+                result = self._get_fallback_treatment(predicted_class, confidence_val)
+                result['groq_enhanced'] = False
+            return result
+        except ValueError as ve:
+            logger.warning(f"[Vision] Invalid image rejected: {ve}")
+            return {'error': str(ve), 'error_type': 'invalid_image'}
         except Exception as e:
             logger.error(f"Vision Service Error: {e}", exc_info=True)
-            return {
-                "error": str(e)
-            }
+            return {'error': str(e), 'error_type': 'server_error'}
 
 
 vision_service = VisionService()

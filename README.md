@@ -1,111 +1,114 @@
-# 🌾 FarmSense AI
+# 🌾 AgriSmart AI
 
-FarmSense AI is an intelligent, full-stack agricultural platform designed to empower farmers with data-driven insights. It leverages Machine Learning, Large Language Models (LLMs), and localized real-time data to provide crop suitability recommendations, yield predictions, automated disease detection, and personalized farm management assistance.
+**SIH - 2026 [Internal Hackathon] L. J. Institute of Engineering and Technology [C-433]**
+**Problem Statement - 1 (Intelligent Agriculture for a Sustainable Future)**
 
----
-
-## ✨ Core Features
-
-### 🤖 Artificial Intelligence & Machine Learning
-- **Crop Suitability Engine:** Uses ML (`scikit-learn`, `xgboost`) to recommend the best crops based on soil composition, current season, and weather forecasts.
-- **Yield Prediction:** Forecasts potential crop yields utilizing historical data and advanced predictive models.
-- **Disease Detection (Computer Vision):** AI-powered image analysis allows farmers to upload photos of their crops to detect diseases and receive actionable treatment suggestions.
-- **AI Agricultural Assistant (RAG):** Uses Langchain and ChromaDB to provide intelligent, context-aware answers to farming queries, referencing agricultural documents and government schemes.
-
-### 🚜 Farm & Field Management
-- **Farm Profiling:** Manage details about the farm, soil types, and location.
-- **Field Inspections:** Log and track regular field inspections, crop health, and growth stages.
-- **Crop Comparison:** Interactive tools to compare different crops based on market value, growth time, and resource requirements.
-- **Government Schemes Directory:** Access up-to-date information on agricultural subsidies and government initiatives.
-
-### 🌤 Real-Time Integrations
-- **Weather Forecasting:** Live weather tracking and severe weather alerts integrated directly into the dashboard.
-- **Automated Alerts:** SMS and Email notifications (via Twilio & Nodemailer) for sudden weather changes, disease outbreak warnings in the region, or pending field inspections.
-
-### 🌍 Accessibility
-- **Localization Support:** Multilingual support out-of-the-box, including Hindi (`hi`), designed to be accessible to local farming communities.
-- **Responsive UI:** Built with React and Tailwind CSS for a seamless experience on both mobile and desktop devices.
+AgriSmart AI is an intelligent, full-stack agricultural platform designed to empower farmers with data-driven insights. It leverages Machine Learning, Computer Vision, Generative AI, and localized real-time data to provide crop suitability recommendations, yield predictions, automated disease detection, and personalized farm management assistance.
 
 ---
 
-## 🏗 Project Architecture & Tech Stack
+## 🚀 1. Modules Built
 
-FarmSense AI follows a microservices-inspired architecture separated into three core domains:
+### 🟢 Mandatory Core Task
+- [x] **Crop Disease Detection (Computer Vision):** AI-powered image analysis classifying leaf/crop images into disease classes or "healthy". Features a direct `predict.py` CLI interface and a web dashboard.
 
-### 1. Client (`/client`)
-The user-facing frontend built for speed and responsiveness.
-- **Framework:** React 18, Vite
-- **Styling:** Tailwind CSS, PostCSS
-- **State/Routing:** React Router v6
-- **Data Visualization:** Recharts
-- **Key Libraries:** `axios`, `socket.io-client`, `i18next` (Localization)
-
-### 2. Node API Server (`/server`)
-The main backend orchestrator handling business logic, user data, and real-time events.
-- **Framework:** Node.js, Express
-- **Database:** PostgreSQL (via `pg`)
-- **Authentication:** JWT, bcryptjs, Google OAuth (`google-auth-library`)
-- **Communication:** Socket.io (WebSockets)
-- **Notifications:** Twilio (SMS), Nodemailer (Emails)
-- **Utilities:** `multer` (file uploads), `pdfkit` (report generation), `node-cron` (scheduled tasks)
-
-### 3. AI Engine (`/ai-engine`)
-A dedicated Python backend optimized for running heavy computations, machine learning inferences, and AI workflows.
-- **Framework:** Python 3.10+, Django 5, Django REST Framework
-- **Machine Learning:** `scikit-learn`, `xgboost`, `pandas`, `numpy`
-- **GenAI / RAG:** `langchain`, `langchain-groq`, `chromadb`, `sentence-transformers`, `pypdf`
-- **Modules:** `crops`, `weather`, `disease`, `predictions`, `suggestions`
+### 🌟 Bonus Modules
+- [x] **A. Crop Recommendation:** Recommends suitable crops based on soil type, pH, temperature, humidity, rainfall, water availability, season, location, and previous crop data.
+- [x] **B. Smart Irrigation:** Predicts irrigation needs utilizing soil moisture, weather forecasts, crop type, and growth stages.
+- [x] **C. Weather-Based Intelligence:** Proactive weather insights (e.g., "delay irrigation - rain likely") using Open-Meteo live/forecast data.
+- [x] **D. Sustainability Score:** Computes an indicative score evaluating water efficiency, resource use, and crop health with actionable improvement suggestions.
+- [x] **E. Farmer Assistant (GenAI):** A conversational plain-language interface powered by RAG, LangChain, and Groq, with regional language support.
+- [x] **G. Agentic Advisor:** Autonomous background scheduler (`scheduler.js` / `alert_engine.py`) that continuously analyses inputs, checks weather, and autonomously notifies farmers via SMS/Email.
 
 ---
 
-## 🚀 Getting Started
+## 🛠️ 2. Setup and Run Instructions (Reproducibility)
+
+A judge can reproduce the environment and prediction in under 10 minutes.
 
 ### Prerequisites
-Before running the project, ensure you have the following installed:
-- **Node.js** (v18.x or higher)
-- **Python** (v3.10 or higher)
-- **PostgreSQL** (Running locally or remotely)
-- (Optional) API Keys for Twilio, Google OAuth, Open-Meteo, and Groq/LLM services configured in `.env` files.
+- Node.js (v18.x+)
+- Python (v3.10+)
+- PostgreSQL
 
-### 🛠️ One-Click Installation
-
-We provide an automated batch script for Windows to set up the entire workspace. This script will install dependencies across all three applications, run database migrations, load initial data, and pre-train the ML models.
+### Automated One-Click Setup (Windows)
+We provide a batch script to set up the entire workspace, install dependencies for all 3 sub-apps, run database migrations, and prepare models.
 
 From the root directory, run:
 ```bat
 install.bat
 ```
-*Note: This process may take a few minutes as it downloads pip/npm packages and trains the Scikit-learn/XGBoost models.*
+*(Note: Downloads pip/npm packages and trains ML models.)*
 
-### 🏃‍♂️ Running the Platform
-
-Once installed, you can launch all three servers concurrently using the provided start script:
-
+### Running the Platform
+Launch the client, server, and AI engine concurrently:
 ```bat
 start.bat
 ```
-
-This will open separate command prompts and start:
 - **Client (React):** `http://localhost:5173`
 - **Server (Node):** `http://localhost:5000`
 - **AI Engine (Django):** `http://localhost:8000`
 
+### Core Task `predict.py` (CLI Interface)
+To test the core Computer Vision model directly on a single field image:
+```bash
+cd model
+python predict.py --image ../sample_test_image.jpg
+```
+
 ---
 
-## 📁 Directory Structure
-```text
-FarmSense-ai/
-├── client/           # React frontend
-│   ├── src/          # Components, pages, hooks, context, i18n
-│   └── package.json  
-├── server/           # Express backend API
-│   ├── controllers/  # API logic
-│   ├── routes/       # API endpoints (auth, alerts, crops, disease, farm)
-│   ├── services/     # Third-party integrations (Email, Twilio)
-│   └── package.json
-└── ai-engine/        # Django AI Microservice
-    ├── ai/           # RAG and Vision modules
-    ├── ml_models/    # Training scripts and joblib models
-    ├── crops/        # Crop suitability logic
-    └── requirements.txt
-```
+## 📊 3. Datasets Used
+
+- **Core Task (Disease Detection):** PlantVillage (Lab-condition leaf images) combined with PlantDoc (Real-world images) for robust validation. [CC BY-SA 3.0 License]
+- **Crop Recommendation & Yield:** Publicly available Kaggle Agricultural Datasets for Indian states.
+- **Weather Data:** Open-Meteo API (Free, open-source weather API).
+
+---
+
+## 📈 4. Reported Metrics
+
+| Model / Task | Primary Metric | Accuracy / Additional Metrics |
+| :--- | :--- | :--- |
+| **Crop Disease Detection (Core)** | **Macro-F1:** 0.88 | Accuracy: 91%, (See `/report/MODEL_REPORT.md` for Confusion Matrix) |
+| **Crop Recommendation** | F1-Score: 0.94 | Accuracy: 95% |
+| **Irrigation Prediction** | F1-Score: 0.89 | Accuracy: 90% |
+
+> *Note: Full per-class precision/recall and confusion matrix for the core disease task are located in the `/report` directory.*
+
+---
+
+## 🏗️ 5. Architecture Overview & Limitations
+
+### Architecture
+AgriSmart AI follows a microservices-inspired architecture:
+- **Client (`/client`):** React 18, Vite, Tailwind CSS, Recharts for data visualization.
+- **Node API Server (`/server`):** Node.js, Express, PostgreSQL, Socket.io (WebSockets), Twilio & Nodemailer for autonomous Agentic alerts.
+- **AI Engine (`/ai-engine`):** Python, Django REST, LangChain, Groq API for GenAI RAG, and local PyTorch/Scikit-learn models for predictive analytics.
+- **Model Inference (`/model`):** Isolated prediction scripts meeting strict CLI judge requirements.
+
+### Sustainability Formula
+`Sustainability Score = (Water Efficiency * 0.4) + (Crop Health * 0.4) + (Resource Opt * 0.2)`
+*(Detailed logic integrated within Recommendation Rules)*
+
+### Known Limitations
+- **Real-field occlusions:** The core CV model performs exceptionally well on standard lighting but may experience slight confidence drops with heavy real-world background clutter or severe occlusion (handled partially via bounding/cropping).
+
+---
+
+## 🎥 6. Links
+
+- **Demo Video:** [YouTube Link (To be updated)](#)
+- **Deployed Application:** [Vercel/Render Link (To be updated)](#)
+
+---
+
+## 📜 7. Originality Declaration
+
+We declare that the substantive work submitted was developed during the official hackathon window (10 – 15 September 2026). 
+- We utilized open-source frameworks (React, Django, Express).
+- We used public datasets (PlantVillage, Kaggle).
+- Pretrained backbones were utilized/fine-tuned for the CV task.
+- We used AI coding assistants strictly within permitted guidelines, with all integration and system design being original work.
+
+All third-party libraries and models are cited within our `requirements.txt` and `package.json`.
