@@ -26,10 +26,14 @@ AgriSmart AI is an intelligent, full-stack agricultural platform designed to emp
 
 A judge can reproduce the environment and prediction in under 10 minutes.
 
-### Prerequisites
-- Node.js (v18.x+)
-- Python (v3.10+)
-- PostgreSQL
+### Prerequisites & Credentials
+- **Node.js** (v18.x+)
+- **Python** (v3.10+)
+- **PostgreSQL**: You must have PostgreSQL running locally. 
+  - **Important:** Create a database named `farmsense`. 
+  - Ensure your local Postgres user is `postgres` and password is `Alish` (or manually update the `DB_PASSWORD` line in the `.env` files located in the `/server` and `/ai-engine` folders to match your local setup).
+
+> **Note on API Keys:** For ease of reproducibility by the judges, all required third-party API keys (Groq for GenAI, Twilio for SMS, Gmail for SMTP, Google OAuth) have been pre-populated in the `.env` files included in the repository. You do NOT need to provide your own API keys.
 
 ### Automated One-Click Setup (Windows)
 We provide a batch script to set up the entire workspace, install dependencies for all 3 sub-apps, run database migrations, and prepare models.
@@ -98,8 +102,8 @@ AgriSmart AI follows a microservices-inspired architecture:
 
 ## 🎥 6. Links
 
-- **Demo Video:** [YouTube Link (To be updated)](#)
-- **Deployed Application:** [Vercel/Render Link (To be updated)](#)
+- **Demo Video:** [Google Drive Link](https://drive.google.com/file/d/16MTNM43nkqGXky3wrcDpHaxPsSFtXN9M/view?usp=sharing)
+
 
 ---
 
